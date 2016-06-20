@@ -4,6 +4,12 @@ A php extension for parse toml file
 ## Toml
 https://github.com/toml-lang/toml   
 
+##Methods
+
+toml_parse(toml_file)  
+
+return array   
+
 ##Contents
 
 ###bool
