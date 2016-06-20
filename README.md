@@ -1,5 +1,5 @@
 # php-toml
-A php extension for parse toml file
+A php7 extension for parse toml file
 
 ## Toml
 https://github.com/toml-lang/toml   
