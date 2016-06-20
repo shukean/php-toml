@@ -1,0 +1,63 @@
+name2="AAA"
+name3 = "BBB"
+
+int1 = +99
+int2 = 42
+int3 = 0
+int4 = -17
+
+int5 = 1_000
+int6 = 5_349_221
+int7 = 1_2_3_4_5     # valid but inadvisable
+
+
+# fractional
+flt1 = +1.0
+flt2 = 3.1415
+flt3 = -0.01
+
+# exponent
+flt4 = 5e+22
+flt5 = 1e6
+flt6 = -2E-2
+
+# both
+flt7 = 6.626e-34
+
+bool1 = true
+bool2 = false
+
+arr1 = [ 1, 2, 3 ]
+arr2 = [ "red", "yellow", "green" ]
+arr3 = [ [ 1, 2 ], [3, 4, 5] ]
+arr4 = [ "all", 'strings', """are the same""", '''type''']
+arr5 = [ [ 1, 2 ], ["a", "b", "c"] ]
+
+arr6 = [ 1, 2.0 ] # INVALID
+
+arr7 = [
+  1, 2, 3
+]
+
+arr8 = [
+  1,
+  2, # this is ok
+]
+
+[table]
+
+[table.1]
+key1 = "some string"
+key2 = 123
+
+[table.2]
+key1 = "another string"
+key2 = 456
+
+[name]
+first = "Tom"
+last = "Preston-Werner"
+
+[point]
+x = 1
+y = 2
