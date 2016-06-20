@@ -364,6 +364,7 @@ PHP_FUNCTION(toml_parse)
         if (input_char == '"' && last_input_char != '\\') {
             in_string = in_string ? 0 : 1;
         }
+        last_input_char = input_char;
 
         if (input_char == '[' && !in_string) {
             array_depth ++;
@@ -400,7 +401,6 @@ PHP_FUNCTION(toml_parse)
 
         BUFFER_COPY_RESIZE(input_char);
 
-        last_input_char = input_char;
     } while (1);
 
     toml_parse_line(&result, &group, buffer, line);
