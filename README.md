@@ -35,7 +35,8 @@ flt6 = -2E-2
 flt7 = 6.626e-34   
 
 ###string
-name = "this a string"
+name = "this a string"   
+name2 = 'this a string too'   
 
 ###array
 arr_a = ["str1", "str2"]   
