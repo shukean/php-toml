@@ -219,10 +219,10 @@ static zval toml_parse_array(char *item_value, int line){
     return arr;
 }
 
-static void toml_parse_line(zval *result, zval **cur_group, char *org_row, int line){
+static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, int line){
     size_t len, i;
     char *item_key, *item_value;
-    zval *group;
+    zval *group, *found_group;
     char *row = org_row;
     
     len = strlen(row) - 1;
@@ -232,58 +232,35 @@ static void toml_parse_line(zval *result, zval **cur_group, char *org_row, int l
 
     //try to parse group
     if(row[0] == '[' && row[len] == ']'){
+        char *tmp_str = NULL, *tmp_stock_str = NULL;
         char *group_key;
-        size_t key_len;
-        size_t start = 1;
-        zval new_group, *_group;
+        zval group_value;
         
-        group = result;
+        tmp_str = estrndup(row + 1, len-1);
         
-        for(i=start; i<len; i++){
-            
-            if (row[i] == ']' || row[i] == '['){
-                php_error_docref(NULL, E_ERROR, "Group name parse fail[1]: %s, line: %d", row, line);
-                return;
-            }
-            if (row[i] == '.'){
-                zval new_group;
-                
-                key_len = i-start;
-                if (key_len < 1){
-                    php_error_docref(NULL, E_ERROR, "Group name parse fail[2]: %s, line: %d", row, line);
-                    return;
-                }
-                group_key = (char *)emalloc(sizeof(char) * (key_len) + 1);
-                memcpy(group_key, row + start, key_len);
-                group_key[key_len] = '\0';
-
-                group = zend_hash_str_find(Z_ARRVAL_P(group), group_key, strlen(group_key));
-                if (!group) {
-                    array_init(&new_group);
-                    group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &new_group);
-                }
-                efree(group_key);
-
-                start = i + 1;
-            }
-        }
-        key_len = len-start;
-        group_key = (char *)emalloc(sizeof(char) * (key_len) + 1);
-        memcpy(group_key, row + start, key_len);
-        group_key[key_len] = '\0';
-
-//        printf("%s\n", key);
-        _group = zend_hash_str_find(Z_ARRVAL_P(group), group_key, strlen(group_key));
-        if (_group){
-            php_error_docref(NULL, E_ERROR, "group %s has already been define, line: %d", group_key, line);
+        group_key = php_strtok_r(tmp_str, ".", &tmp_stock_str);
+        if (!group_key) {
+            efree(tmp_str);
+            php_error_docref(NULL, E_ERROR, "Group name parse fail : %s, line: %d", row, line);
             return;
         }
         
-        array_init(&new_group);
-        group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &new_group);
-        *cur_group = group;
-        
-        efree(group_key);
+        group = zend_hash_str_find(Z_ARRVAL_P(result), group_key, strlen(group_key));
+        if (!group){
+            array_init(&group_value);
+            group = zend_hash_str_update(Z_ARRVAL_P(result), group_key, strlen(group_key), &group_value);
+        }
+        while ((group_key = php_strtok_r(NULL, ".", &tmp_stock_str))) {
+            found_group = zend_hash_str_find(Z_ARRVAL_P(group), group_key, strlen(group_key));
+            if (!found_group){
+                zval group_child_value;
+                array_init(&group_child_value);
+                found_group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &group_child_value);
+            }
+            group = found_group;
+        }
+        efree(tmp_str);
+        *group_add_item = group;
         return;
     }
 
@@ -291,10 +268,10 @@ static void toml_parse_line(zval *result, zval **cur_group, char *org_row, int l
     if (item_key) {
         zval parse_value;
 
-        if (!*cur_group) {
+        if (!*group_add_item) {
             group = result;
         }else{
-            group = *cur_group;
+            group = *group_add_item;
         }
         
         //blank key
@@ -380,7 +357,6 @@ PHP_FUNCTION(toml_parse)
 
         if (input_char == '\n') {
             in_comment = 0;
-            line ++;
 
             if (in_string) {
                 php_error_docref(NULL, E_ERROR, "Multiline strings are not supported, line: %d", line);
@@ -392,6 +368,8 @@ PHP_FUNCTION(toml_parse)
                 memset((void *)buffer, 0, buffer_length);
                 buffer_used = 0;
             }
+            
+            line ++;
             continue;
         }
 
@@ -403,7 +381,7 @@ PHP_FUNCTION(toml_parse)
 
     } while (1);
 
-    toml_parse_line(&result, &group, buffer, line);
+    toml_parse_line(&result, &group, buffer, line + 1);
 
     efree(buffer);
 

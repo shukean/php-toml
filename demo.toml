@@ -2,6 +2,7 @@
 
 
 title="demo"
+empty_title = ''
 
 [int]
 int1 = +99
