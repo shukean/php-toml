@@ -141,4 +141,12 @@ key_a = "value"
 
 
 ###Array of Tables
-**Not supported**
+[[ab]]   
+  name = "vvv"   
+  [[ab.vv]]   
+  name = "granny smith"   
+  [[ab.vv]]   
+  name = "granny smith 2"   
+
+[[ab]]   
+  name = "bbb"   
