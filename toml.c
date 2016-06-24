@@ -284,6 +284,9 @@ static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, 
         if (!item_value) {
             item_value = item_key;
             item_key = NULL;
+        }else if(strlen(item_key) == 2 &&
+                 ((item_key[0] == '\'' && item_key[1] == '\'') || (item_key[0] == '"' && item_key[1] == '"'))){
+            item_key = NULL;
         }
 
         parse_value = toml_parse_value(item_value, line);
