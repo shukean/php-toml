@@ -62,7 +62,40 @@ key2 = 123
 [table.2]
 key1 = "another string"
 key2 = 456
+2 = [
+  [
+    1, 2, [3, 4]
+  ]
+]
 
+[table.2.1]
+key1 = "another string"
+key2 = 456
+
+
+[string]
+str1 =  "str1 '\" escape \ndff"
+str2 = '" a \'\nba dkj'
+
+str3 = """
+  line1
+  line2 \nstr
+  line3"""
+
+str4 = """
+  line1 \
+  line2 \nstr \
+  line3 \
+"""
+
+str5 = """line1 line\"2\nstr line3"""
+
+regex2 = '''I [dw]on't need \d{2} apples'''
+lines  = '''
+The first newline is
+trimmed in raw strings.
+   All other whitespace
+   is preserved.'''
 
 [fruit]
   name = "apple"

@@ -27,6 +27,7 @@
 #include "ext/standard/info.h"
 #include "php_toml.h"
 #include "zend_strtod.h"
+#include "ext/standard/php_string.h"
 
 /* If you declare any globals in php_toml.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(toml)
@@ -60,6 +61,8 @@ PHP_INI_END()
         buffer_used += sizeof(_ch);                                         \
     }while(0)                                                               \
 
+#define CHECK_NOT_WHITESPACE(c) \
+    ((c) == '\b' || (c) == '\t' || (c) == '\n' || (c) == '\f' || (c) == '\r' || (c) == ' ') \
 
 
 static char* big_numeral(char *str){
@@ -153,6 +156,9 @@ static zval toml_parse_value(char *item_value, int line){
             ZVAL_EMPTY_STRING(&str);
         }else{
             ZVAL_STRINGL(&str, item_value + 1, strlen(item_value) - 2);
+            if(item_value[0] == '"'){
+                php_stripcslashes(Z_STR(str));
+            }
         }
         return str;
     }
@@ -304,10 +310,13 @@ PHP_FUNCTION(toml_parse)
     zval result, *group = NULL;
     php_stream *stream;
     zend_bool in_string = 0, in_comment = 0;
+    zend_bool in_basic_string = 0,  in_literal_string = 0;
+    zend_bool in_multi_basic_string = 0, in_multi_literal_string = 0;
+    zend_bool ignore_blank_to_next_char = 0;
     unsigned int array_depth = 0;
-    char *buffer = NULL;
+    zend_string *toml_contents;
+    char *buffer = NULL, *contents;
     size_t buffer_length = sizeof(char) * TOML_BUFFER_SIZE + 1, buffer_used = 0;
-    int input_char = 0, last_input_char = 0;
     int line = 1;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_file) == FAILURE) {
@@ -319,29 +328,76 @@ PHP_FUNCTION(toml_parse)
         php_error_docref(NULL, E_ERROR, "toml file open fail");
         RETURN_FALSE;
     }
+    
+    if ((toml_contents = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0)) == NULL) {
+        php_stream_close(stream);
+        php_error_docref(NULL, E_NOTICE, "toml file empty");
+        array_init(return_value);
+        return;
+    }
 
     buffer = (char *) emalloc(buffer_length);
     memset((void *)buffer, 0, buffer_length);
 
     array_init(&result);
 
-    php_stream_rewind(stream);
-    do {
-        input_char = php_stream_getc(stream);
-        if (input_char == EOF) {
-            break;
-        }
+    contents = ZSTR_VAL(toml_contents);
+    for (size_t i=0, len=ZSTR_LEN(toml_contents); i<len; i++) {
+        int input_char = contents[i];
 
         //start of comment
         if (input_char == '#' && !in_string) {
             in_comment = 1;
         }
 
+//        printf("%c", input_char);
         // start / end of string
-        if (input_char == '"' && last_input_char != '\\') {
+        if (input_char == '"' && (i == 0 || contents[i-1]!= '\\') && !in_literal_string && !in_multi_literal_string) {
             in_string = in_string ? 0 : 1;
+            if (contents[i+1] == '"' && contents[i+2] == '"') {
+                if (in_basic_string) {
+                    php_error_docref(NULL, E_ERROR, "Basic string can't content multi string flag, line %d", line);
+                    RETURN_FALSE;
+                }
+                in_multi_basic_string = in_multi_basic_string ? 0 : 1;
+                i+=2;
+                if (in_multi_basic_string && contents[i+1] == '\n') {
+                    line++;
+                    i+=1;
+                }
+                BUFFER_COPY_RESIZE(input_char);
+                continue;
+            }else{
+                if (in_multi_basic_string) {
+                    php_error_docref(NULL, E_ERROR, "Basic multi string can't content single flag, line %d", line);
+                    RETURN_FALSE;
+                }
+                in_basic_string = in_basic_string ? 0 : 1;
+            }
         }
-        last_input_char = input_char;
+        // start / end of string
+        if (input_char == '\'' && (i == 0 || contents[i-1]!= '\\') && !in_basic_string && !in_multi_basic_string) {
+            if (contents[i+1] == '\'' && contents[i+2] == '\'') {
+                in_string = in_string ? 0 : 1;
+                if (in_literal_string) {
+                    php_error_docref(NULL, E_ERROR, "Literal string can't content multi literal string flag, line %d", line);
+                    RETURN_FALSE;
+                }
+                in_multi_literal_string = in_multi_literal_string ? 0 : 1;
+                i+=2;
+                if (in_multi_literal_string && contents[i+1] == '\n') {
+                    line++;
+                    i+=1;
+                }
+                BUFFER_COPY_RESIZE(input_char);
+                continue;
+            }else{
+                if (!in_multi_literal_string) {
+                    in_string = in_string ? 0 : 1;
+                    in_literal_string = in_literal_string ? 0 : 1;
+                }
+            }
+        }
 
         if (input_char == '[' && !in_string) {
             array_depth ++;
@@ -355,11 +411,40 @@ PHP_FUNCTION(toml_parse)
             continue;
         }
 
+        if (in_multi_basic_string) {
+            ignore_blank_to_next_char = 0;
+            if (contents[i] == '\\' && contents[i+1] == '\n') {
+                ignore_blank_to_next_char = 1;
+                for (; ignore_blank_to_next_char; i++) {
+                    if (contents[i] == '\n') {
+                        line++;
+                    }
+                    if (!CHECK_NOT_WHITESPACE(contents[i+1])) {
+                        ignore_blank_to_next_char = 0;
+                    }
+                }
+                i--;
+                continue;
+            }
+            if (!ignore_blank_to_next_char && contents[i] == '\n') {
+                line++;
+                BUFFER_COPY_RESIZE('\n');
+                continue;
+            }
+        }
+        if (in_multi_literal_string){
+            if (contents[i] == '\n') {
+                line++;
+                BUFFER_COPY_RESIZE('\n');
+                continue;
+            }
+        }
+        
         if (input_char == '\n') {
             in_comment = 0;
 
             if (in_string) {
-                php_error_docref(NULL, E_ERROR, "Multiline strings are not supported, line: %d", line);
+                php_error_docref(NULL, E_ERROR, "String exception: found a linefeed char, line: %d", line);
             }
 
             if (array_depth == 0) {
@@ -379,12 +464,12 @@ PHP_FUNCTION(toml_parse)
 
         BUFFER_COPY_RESIZE(input_char);
 
-    } while (1);
+    };
 
     toml_parse_line(&result, &group, buffer, line + 1);
 
     efree(buffer);
-
+    zend_string_free(toml_contents);
     php_stream_close(stream);
 
     ZVAL_COPY_VALUE(return_value, &result);
