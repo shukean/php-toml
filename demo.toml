@@ -120,6 +120,15 @@ trimmed in raw strings.
   [fruit.variety]
     name = "red delicious"
 
-  [fruit.variety2]
+  [fruit.variety]
     name = "granny smith"
 
+[[ab]]
+  name = "vvv"
+  [[ab.vv]]
+  name = "granny smith"
+  [[ab.vv]]
+  name = "granny smith 2"
+
+[[ab]]
+  name = "bbb"

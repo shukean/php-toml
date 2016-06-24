@@ -241,8 +241,14 @@ static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, 
         char *tmp_str = NULL, *tmp_stock_str = NULL;
         char *group_key;
         zval group_value;
+        zend_bool is_array_table = 0;
         
-        tmp_str = estrndup(row + 1, len-1);
+        if (row[1] == '[' && row[len-1] == ']') {
+            is_array_table = 1;
+            tmp_str = estrndup(row + 2, len-3);
+        }else{
+            tmp_str = estrndup(row + 1, len-1);
+        }
         
         group_key = php_strtok_r(tmp_str, ".", &tmp_stock_str);
         if (!group_key) {
@@ -254,16 +260,82 @@ static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, 
         group = zend_hash_str_find(Z_ARRVAL_P(result), group_key, strlen(group_key));
         if (!group){
             array_init(&group_value);
-            group = zend_hash_str_update(Z_ARRVAL_P(result), group_key, strlen(group_key), &group_value);
+            if (!is_array_table) {
+                group = zend_hash_str_update(Z_ARRVAL_P(result), group_key, strlen(group_key), &group_value);
+            }else{
+                zval tmp_group_value;
+                uint32_t num;
+
+                array_init(&tmp_group_value);
+                found_group = zend_hash_str_update(Z_ARRVAL_P(result), group_key, strlen(group_key), &group_value);
+                zend_hash_next_index_insert(Z_ARR_P(found_group), &tmp_group_value);
+                
+                num = zend_hash_num_elements(Z_ARR_P(found_group));
+                group = zend_hash_index_find(Z_ARR_P(found_group), num - 1);
+                if (!group) {
+                    php_error_docref(NULL, E_ERROR, "Array tables core error");
+                }
+            }
+        }else{
+            if (!is_array_table) {
+                if (tmp_stock_str == NULL) {
+                    php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", group_key, line);
+                    return;
+                }
+            }else{
+                zval tmp_group_value;
+                uint32_t num;
+                
+                if (tmp_stock_str == NULL) {
+                    array_init(&tmp_group_value);
+                    zend_hash_next_index_insert(Z_ARR_P(group), &tmp_group_value);
+                }
+
+                num = zend_hash_num_elements(Z_ARR_P(group));
+                group = zend_hash_index_find(Z_ARR_P(group), num - 1);
+                if (!group) {
+                    php_error_docref(NULL, E_ERROR, "Array tables core error");
+                }
+            }
         }
+        
         while ((group_key = php_strtok_r(NULL, ".", &tmp_stock_str))) {
             found_group = zend_hash_str_find(Z_ARRVAL_P(group), group_key, strlen(group_key));
             if (!found_group){
-                zval group_child_value;
-                array_init(&group_child_value);
-                found_group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &group_child_value);
+                if (!is_array_table) {
+                    zval group_child_value;
+                    array_init(&group_child_value);
+                    found_group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &group_child_value);
+                }else{
+                    zval group_child_value;
+                    array_init(&group_child_value);
+                    found_group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &group_child_value);
+                }
+            }else{
+                if (!is_array_table && tmp_stock_str == NULL) {
+                    php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", group_key, line);
+                    return;
+                }
             }
-            group = found_group;
+            
+            if (!is_array_table) {
+                group = found_group;
+            }else{
+                zval tmp_group_value;
+                uint32_t num;
+                
+                if (tmp_stock_str == NULL) {
+                    array_init(&tmp_group_value);
+                    zend_hash_next_index_insert(Z_ARR_P(found_group), &tmp_group_value);
+                }
+                
+                num = zend_hash_num_elements(Z_ARR_P(found_group));
+//                printf("%d", num);
+                group = zend_hash_index_find(Z_ARR_P(found_group), num - 1);
+                if (!group) {
+                    php_error_docref(NULL, E_ERROR, "Array tables core error");
+                }
+            }
         }
         efree(tmp_str);
         *group_add_item = group;
