@@ -273,7 +273,7 @@ static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, 
                 num = zend_hash_num_elements(Z_ARR_P(found_group));
                 group = zend_hash_index_find(Z_ARR_P(found_group), num - 1);
                 if (!group) {
-                    php_error_docref(NULL, E_ERROR, "Array tables core error");
+                    php_error_docref(NULL, E_ERROR, "Array tables core error, not found array index %d, line %d", num, line);
                 }
             }
         }else{
@@ -294,7 +294,7 @@ static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, 
                 num = zend_hash_num_elements(Z_ARR_P(group));
                 group = zend_hash_index_find(Z_ARR_P(group), num - 1);
                 if (!group) {
-                    php_error_docref(NULL, E_ERROR, "Array tables core error");
+                    php_error_docref(NULL, E_ERROR, "Array tables core error, not found array index %d, line %d", num, line);
                 }
             }
         }
