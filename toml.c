@@ -218,7 +218,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
     zval *g, *gp;
     char *str = raw_str;
 
-    printf("%s\n", str);
+//    printf("%s\n", str);
     //try to parse group
     if(str[0] == '[' && str[len - 1] == ']'){
         char *g_key_str, *g_tok_key_str;
