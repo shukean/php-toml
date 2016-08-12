@@ -13,7 +13,7 @@ foreach($functions as $func) {
 echo "$br\n";
 
 
-$ret = toml_parse('./demo.toml');
+$ret = toml_parse_file('./demo.toml');
 
 echo "\n";
 

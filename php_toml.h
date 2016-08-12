@@ -53,6 +53,7 @@ static zval toml_parse_item_array(char *item_value, size_t max_len, int line);
 static zval* get_array_last_item(zval *stack);
 static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group, zend_bool *top_is_array_table, int line);
 static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval);
+static void parse_toml(zend_string *toml_contents, zval *return_value);
 
 /* Always refer to the globals in your function as TOML_G(variable).
    You are encouraged to rename these macros something shorter, see

@@ -218,7 +218,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
     zval *g, *gp;
     char *str = raw_str;
 
-//    printf("%s\n", str);
+    printf("%s\n", str);
     //try to parse group
     if(str[0] == '[' && str[len - 1] == ']'){
         char *g_key_str, *g_tok_key_str;
@@ -337,7 +337,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
         }else{
             zend_bool is_quoted_key = 0;
             if (item_key[0] == '"' || item_key[0] == '\'') {
-                char *key = strndup(item_key + 1, strlen(item_key) - 2);
+                char *key = estrndup(item_key + 1, strlen(item_key) - 2);
                 item_key = key;
                 is_quoted_key = 1;
             }
@@ -353,28 +353,28 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
 
 }
 
-/* Every user-visible function in PHP should document itself in the source */
-/* {{{ proto string confirm_toml_compiled(string arg)
-   Return a string to confirm that the module is compiled in */
-PHP_FUNCTION(toml_parse)
+
+
+PHP_FUNCTION(toml_parse_string)
 {
-	zend_string *toml_file, *toml_contents;
+    zend_string *toml_contents;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_contents) == FAILURE) {
+        return;
+    }
+    
+    parse_toml(toml_contents, return_value);
+}
+
+
+PHP_FUNCTION(toml_parse_file)
+{
+    zend_string *toml_file, *toml_contents;
     php_stream *stream;
-    zend_bool in_string = 0, in_comment = 0;
-    zend_bool in_basic_string = 0,  in_literal_string = 0;
-    zend_bool in_multi_basic_string = 0, in_multi_literal_string = 0;
-    zend_bool ignore_blank_to_next_char = 0;
-    unsigned int array_depth = 0;
-    zval result, *group = NULL;
-    zend_bool top_is_array_table = 0;
-    char *buffer = NULL, *contents;
-    size_t buffer_used = 0, toml_contents_len = 0;
-    unsigned int line = 1;
-
-	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_file) == FAILURE) {
-		return;
-	}
-
+    
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_file) == FAILURE) {
+        return;
+    }
+    
     stream = php_stream_open_wrapper(ZSTR_VAL(toml_file), "rb", USE_PATH | REPORT_ERRORS, NULL);
     if (!stream) {
         php_error_docref(NULL, E_ERROR, "toml file open fail");
@@ -389,6 +389,24 @@ PHP_FUNCTION(toml_parse)
     }
     
     php_stream_close(stream);
+    
+    parse_toml(toml_contents, return_value);
+    
+    zend_string_free(toml_contents);
+}
+
+
+static void parse_toml(zend_string *toml_contents, zval *return_value){
+    zend_bool in_string = 0, in_comment = 0;
+    zend_bool in_basic_string = 0,  in_literal_string = 0;
+    zend_bool in_multi_basic_string = 0, in_multi_literal_string = 0;
+    zend_bool ignore_blank_to_next_char = 0;
+    unsigned int array_depth = 0;
+    zval result, *group = NULL;
+    zend_bool top_is_array_table = 0;
+    char *buffer = NULL, *contents;
+    size_t buffer_used = 0, toml_contents_len = 0;
+    unsigned int line = 1;
 
     array_init(&result);
     toml_contents_len = ZSTR_LEN(toml_contents);
@@ -525,8 +543,7 @@ PHP_FUNCTION(toml_parse)
     }
 
     efree(buffer);
-    zend_string_free(toml_contents);
-
+    
     ZVAL_COPY_VALUE(return_value, &result);
     return;
 }
@@ -612,7 +629,8 @@ PHP_MINFO_FUNCTION(toml)
  * Every user visible function must have an entry in toml_functions[].
  */
 const zend_function_entry toml_functions[] = {
-	PHP_FE(toml_parse,	NULL)		/* For testing, remove later. */
+	PHP_FE(toml_parse_file,	NULL)
+    PHP_FE(toml_parse_string, NULL)
 	PHP_FE_END	/* Must be the last line in toml_functions[] */
 };
 /* }}} */
