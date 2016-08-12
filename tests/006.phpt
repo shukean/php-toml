@@ -4,7 +4,7 @@ Check for toml table
 <?php if (!extension_loaded("toml")) print "skip"; ?>
 --FILE--
 <?php 
-echo json_encode(toml_parse(__DIR__.'/006.toml'));
+echo json_encode(toml_parse_file(__DIR__.'/006.toml'));
 /*
 	you can add regression tests for your extension here
 

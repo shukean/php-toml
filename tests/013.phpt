@@ -4,7 +4,7 @@ Check for toml repeat group
 <?php if (!extension_loaded("toml")) print "skip"; ?>
 --FILE--
 <?php 
-echo json_encode(toml_parse(__DIR__.'/013.toml'));
+echo json_encode(toml_parse_file(__DIR__.'/013.toml'));
 /*
 	you can add regression tests for your extension here
 
@@ -18,4 +18,4 @@ echo json_encode(toml_parse(__DIR__.'/013.toml'));
 */
 ?>
 --EXPECTF--
- Fatal error: toml_parse(): Table group1 is alreay defind, line 7.  in %s/013.php on line %d
+ Fatal error: toml_parse_file(): Table group1 is alreay defind, line 7.  in %s/013.php on line %d

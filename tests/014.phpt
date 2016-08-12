@@ -4,7 +4,7 @@ Check for toml invalid key
 <?php if (!extension_loaded("toml")) print "skip"; ?>
 --FILE--
 <?php 
-echo json_encode(toml_parse(__DIR__.'/014.toml'));
+echo json_encode(toml_parse_file(__DIR__.'/014.toml'));
 /*
 	you can add regression tests for your extension here
 
@@ -18,4 +18,4 @@ echo json_encode(toml_parse(__DIR__.'/014.toml'));
 */
 ?>
 --EXPECTF--
-Fatal error: toml_parse(): Undefined value type not supported jjjjjjjjjj, line 3 in %s/tests/014.php on line %d
+Fatal error: toml_parse_file(): Undefined value type not supported jjjjjjjjjj, line 3 in %s/tests/014.php on line %d
