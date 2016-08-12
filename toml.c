@@ -342,7 +342,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
                 is_quoted_key = 1;
             }
             zend_hash_str_update(Z_ARR_P(g), item_key, strlen(item_key), &val);
-            if (!is_quoted_key) {
+            if (is_quoted_key) {
                 efree(item_key);
             }
         }
