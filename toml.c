@@ -335,7 +335,16 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
         if (item_key == NULL) {
             zend_hash_next_index_insert(Z_ARR_P(g), &val);
         }else{
+            zend_bool is_quoted_key = 0;
+            if (item_key[0] == '"' || item_key[0] == '\'') {
+                char *key = strndup(item_key + 1, strlen(item_key) - 2);
+                item_key = key;
+                is_quoted_key = 1;
+            }
             zend_hash_str_update(Z_ARR_P(g), item_key, strlen(item_key), &val);
+            if (!is_quoted_key) {
+                efree(item_key);
+            }
         }
 
     }else{
