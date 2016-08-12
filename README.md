@@ -6,13 +6,23 @@ https://github.com/toml-lang/toml
 
 ## Methods
 
-`array toml_parse(string toml_file_name) ` 
+`array toml_parse_file(string toml_file_name) ` 
 ### Parameters
 `toml_file_name`: Name of the file read.
 ### Return Values
 The function returns array or **False** on failure.
 ### Errors/Exceptions
 An E_ERROR level error is generated if toml contents parse fail, file cannot be found.   
+An E_NOTICE level error is generated if toml contents is empty.
+
+
+`array toml_parse_string(string toml_contents) ` 
+### Parameters
+`toml_contents`: A toml struct string.
+### Return Values
+The function returns array or **False** on failure.
+### Errors/Exceptions
+An E_ERROR level error is generated if toml contents parse fail.   
 An E_NOTICE level error is generated if toml contents is empty.
 
 ## Toml Syntax Supported
