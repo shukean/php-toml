@@ -18,4 +18,4 @@ echo json_encode(toml_parse(__DIR__.'/005.toml'));
 */
 ?>
 --EXPECT--
-{"arr1":[1,2,3],"arr2":["red","yellow","green"],"arr3":[[1,2],[3,4,5]],"arr4":["all","strings","\"\"are the same\"\"","''type''"],"arr5":[[1,2],["a","b","c"]],"arr6":[1,2],"arr7":[1,2,3],"arr8":[1,2]}
+{"arr1":[1,2,3],"arr2":["red","yellow","green"],"arr3":[[1,2],[3,4,5]],"arr4":["all","strings","are the same","type"],"arr5":[[1,2],["a","b","c"]],"arr6":[1,2],"arr7":[1,2,3],"arr8":[1,2]}

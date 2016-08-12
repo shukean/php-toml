@@ -18,4 +18,4 @@ echo json_encode(toml_parse(__DIR__.'/014.toml'));
 */
 ?>
 --EXPECTF--
-Fatal error: toml_parse(): Undefined type not supported jjjjjjjjjj, line 3 in %s/tests/014.php on line %d
+Fatal error: toml_parse(): Undefined value type not supported jjjjjjjjjj, line 3 in %s/tests/014.php on line %d
