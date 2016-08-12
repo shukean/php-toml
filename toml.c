@@ -50,139 +50,53 @@ PHP_INI_END()
    so that your module can be compiled into PHP, it exists only for testing
    purposes. */
 
-#define BUFFER_COPY_RESIZE(str)                                             \
-    do{                                                                     \
-        char _ch = (char) str;                                              \
-        if (buffer_used + sizeof(_ch) >= buffer_length){                    \
-            buffer_length += buffer_used + sizeof(_ch) * TOML_BUFFER_SIZE;  \
-            buffer = erealloc(buffer, buffer_length);                       \
-        }                                                                   \
-        memcpy(buffer + buffer_used, &_ch, sizeof(_ch));                    \
-        buffer_used += sizeof(_ch);                                         \
-    }while(0)                                                               \
 
 #define CHECK_NOT_WHITESPACE(c) \
-    ((c) == '\b' || (c) == '\t' || (c) == '\n' || (c) == '\f' || (c) == '\r' || (c) == ' ') \
+    ((c) == '\b' || (c) == '\t' || (c) == '\n' || (c) == '\f' || (c) == '\r' || (c) == ' ') 
 
 
-static char* big_numeral(char *str){
-    char *buf, ch;
-    size_t used = 0;
-    
-    buf = (char *)emalloc(sizeof(char) * strlen(str));
-    memset((void *)buf, 0, strlen(str));
-    
-    while (*str) {
-        ch = *str;
-        if (!(*str == '_' || *str == ',')){
-            memcpy(buf + used, &ch, sizeof(ch));
-            used += sizeof(ch);
-        }
-        str++;
-    }
-    return buf;
+#define TOML_PARSE_STR(str, str_len) toml_parse_str(str, str_len, &result, &group, &top_is_array_table, line)
+
+
+#define COPY_CHAR_TO_BUF(c, buf, pos){              \
+    memcpy(buf + pos, &c, sizeof(c));               \
+    pos += sizeof(c);                               \
 }
 
-static zend_bool is_float(char *str){
+
+static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval){
+    size_t s1 = 0, s2 = 0, l = 0;
+    char *new = ecalloc(sizeof(char), strlen(str) + 1);
+    char *raw = str;
+    zend_uchar ret;
     
-    if (*str > '9'){
-        return 0;
-    }
-    if (*str == '-' || *str == '+') {
-        str++;
-    }
     while (*str) {
-        if (!((*str >= '0' && *str <= '9') || *str == '.' || *str == '_' || *str == ','
-              || *str == 'e' || *str == 'E' || *str == '-' || *str == '+')){
-            return 0;
-        }
-        str++;
-    }
-    return 1;
-}
-
-static zend_bool is_int(char *str){
-    
-    if (*str > '9'){
-        return 0;
-    }
-    if (*str == '-' || *str == '+') {
-        str++;
-    }
-    while (*str) {
-        if (!((*str >= '0' && *str <= '9') || *str == '_' || *str == ',')){
-            return 0;
-        }
-        str++;
-    }
-    return 1;
-}
-
-static zval toml_parse_value(char *item_value, int line){
-    zval default_val;
-//    printf("%s--%d\n", item_value, strlen(item_value));
-    
-    if (!memcmp(item_value, "true", strlen(item_value)) || !memcmp(item_value, "false", strlen(item_value)) ) {
-        zval b;
-        ZVAL_BOOL(&b, !memcmp(item_value, "true", strlen(item_value)));
-        return b;
-    }
-
-    if (is_int(item_value)) {
-        zval i;
-        char *new_str;
-        
-        new_str = big_numeral(item_value);
-        ZVAL_LONG(&i, atol(new_str));
-        efree(new_str);
-        return i;
-    }
-
-    if (is_float(item_value)) {
-        zval f;
-        char *new_str;
-        
-        new_str = big_numeral(item_value);
-        ZVAL_DOUBLE(&f, zend_strtod(new_str, NULL));
-        efree(new_str);
-        return f;
-    }
-
-    if ((item_value[0] == '"' && item_value[strlen(item_value) - 1] == '"')
-        || (item_value[0] == '\'' && item_value[strlen(item_value) - 1] == '\'')) {
-        zval str;
-        
-        if (strlen(item_value) == 2) {
-            ZVAL_EMPTY_STRING(&str);
+        if (*str == '_' || *str == ','){
+            memcpy(new + s2, raw + s1, l);
+            s1 += l + 1;
+            s2 += l;
+            l = 0;
         }else{
-            ZVAL_STRINGL(&str, item_value + 1, strlen(item_value) - 2);
-            if(item_value[0] == '"'){
-                php_stripcslashes(Z_STR(str));
-            }
+            l++;
         }
-        return str;
+        str++;
     }
-
-    if (item_value[0] == '[' && item_value[strlen(item_value) -1] == ']') {
-        return toml_parse_array(item_value, line);
-    }
-    
-    php_error_docref(NULL, E_ERROR, "Undefined type not supported %s, line %d", item_value, line);
-    
-    ZVAL_NULL(&default_val);
-    return default_val;
+    memcpy(new + s2, raw + s1, l);
+//    printf("%s\n", new);
+    ret = is_numeric_string(new, strlen(new), lval, dval, 1);
+    efree(new);
+    return ret;
 }
 
-static zval toml_parse_array(char *item_value, int line){
+static zval toml_parse_item_array(char *item_value, size_t max_len, int line){
 	zval arr;
 	size_t i, len = strlen(item_value) - 1;
 	int depth = 0;
 	zend_bool in_string = 0;
 	char *buffer = NULL;
-	size_t buffer_length = sizeof(char) * TOML_BUFFER_SIZE + 1, buffer_used = 0;
+	size_t buffer_used = 0;
 
-	buffer = (char *) emalloc(buffer_length);
-	memset((void *)buffer, 0, buffer_length);
+    buffer = ecalloc(sizeof(char), max_len + 1);
 
 	array_init(&arr);
 	for (i = 1; i<len; i++) {
@@ -200,14 +114,14 @@ static zval toml_parse_array(char *item_value, int line){
 
 		if (!in_string && ch == ',' && 0 == depth) {
             zval val;
-			val = toml_parse_value(buffer, line);
+			val = toml_parse_item_value(buffer, buffer_used, line);
             zend_hash_next_index_insert(Z_ARR(arr), &val);
 
-			memset((void *)buffer, 0, buffer_length);
+			memset((void *)buffer, 0, max_len + 1);
 			buffer_used = 0;
 			continue;
 		}
-		BUFFER_COPY_RESIZE(ch);
+        COPY_CHAR_TO_BUF(ch, buffer, buffer_used);
 	}
 
 	if (depth != 0) {
@@ -215,9 +129,9 @@ static zval toml_parse_array(char *item_value, int line){
 		return arr;
 	}
 
-    if (strlen(buffer) > 0) {
+    if (buffer_used > 0) {
         zval val;
-        val = toml_parse_value(buffer, line);
+        val = toml_parse_item_value(buffer, buffer_used, line);
         zend_hash_next_index_insert(Z_ARR(arr), &val);
     }
 
@@ -225,174 +139,228 @@ static zval toml_parse_array(char *item_value, int line){
     return arr;
 }
 
-static void toml_parse_line(zval *result, zval **group_add_item, char *org_row, int line){
-    size_t len, i;
-    char *item_key, *item_value;
-    zval *group, *found_group;
-    char *row = org_row;
+static zval* get_array_last_item(zval *stack){
+    zval *val;
+    uint32_t idx;
+    Bucket *p;
     
-    len = strlen(row) - 1;
-    if (len == -1) {
-        return;
+    /* Get the last value and copy it into the return value */
+    idx = Z_ARRVAL_P(stack)->nNumUsed;
+    while (1) {
+        if (idx == 0) {
+            return NULL;
+        }
+        idx--;
+        p = Z_ARRVAL_P(stack)->arData + idx;
+        val = &p->val;
+        break;
     }
+    return val;
+}
 
+
+static zval toml_parse_item_value(char *item_value, size_t max_len, int line){
+    zval val;
+    size_t item_val_len = strlen(item_value);
+    
+    int  ret_true;
+    
+    zend_uchar ret_numeric;
+    zend_long lval;
+    double dval;
+    
+//    printf("%s--%lu\n", item_value, strlen(item_value));
+    
+    ret_true = memcmp(item_value, "true", strlen(item_value)) == 0;
+    if (ret_true|| memcmp(item_value, "false", strlen(item_value)) == 0) {
+        ZVAL_BOOL(&val, ret_true);
+        return val;
+    }
+    
+    if ((ret_numeric = toml_is_numeric(item_value, &lval, &dval)) != 0) {
+        if (ret_numeric == IS_LONG) {
+            ZVAL_LONG(&val, lval);
+        }else if (ret_numeric == IS_DOUBLE){
+            ZVAL_DOUBLE(&val, dval);
+        }else{
+            php_error_docref(NULL, E_ERROR, "Convert to number fail %s, line %d", item_value, line);
+        }
+        return val;
+    }
+    
+    
+    if ((item_value[0] == '"' && item_value[item_val_len - 1] == '"')
+        || (item_value[0] == '\'' && item_value[item_val_len - 1] == '\'')) {
+        if (strlen(item_value) == 2) {
+            ZVAL_EMPTY_STRING(&val);
+        }else{
+            ZVAL_STRINGL(&val, item_value + 1, item_val_len - 2);
+            if(item_value[0] == '"'){
+                php_stripcslashes(Z_STR(val));
+            }
+        }
+        return val;
+    }
+    
+    if (item_value[0] == '[' && item_value[item_val_len -1] == ']') {
+        return toml_parse_item_array(item_value, max_len, line);
+    }
+    
+    php_error_docref(NULL, E_ERROR, "Undefined value type not supported %s, line %d", item_value, line);
+    
+    ZVAL_NULL(&val);
+    return val;
+}
+
+
+static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group, zend_bool *top_is_array_table, int line){
+    char *item_key, *item_val;
+    zval *g, *gp;
+    char *str = raw_str;
+
+//    printf("%s\n", str);
     //try to parse group
-    if(row[0] == '[' && row[len] == ']'){
-        char *tmp_str = NULL, *tmp_stock_str = NULL;
-        char *group_key;
-        zval group_value;
+    if(str[0] == '[' && str[len - 1] == ']'){
+        char *g_key_str, *g_tok_key_str;
+        char *g_key;
         zend_bool is_array_table = 0;
         
-        if (row[1] == '[' && row[len-1] == ']') {
+        if (str[1] == '[' && str[len-2] == ']') {
             is_array_table = 1;
-            tmp_str = estrndup(row + 2, len-3);
+            g_key_str = estrndup(str + 2, len-4);
         }else{
-            tmp_str = estrndup(row + 1, len-1);
+            g_key_str = estrndup(str + 1, len-2);
         }
         
-        group_key = php_strtok_r(tmp_str, ".", &tmp_stock_str);
-        if (!group_key) {
-            efree(tmp_str);
-            php_error_docref(NULL, E_ERROR, "Group name parse fail : %s, line: %d", row, line);
+        g_key = php_strtok_r(g_key_str, ".", &g_tok_key_str);
+        if (UNEXPECTED(!g_key)) {
+            efree(g_key_str);
+            php_error_docref(NULL, E_ERROR, "Group name parse fail : %s, line: %d", raw_str, line);
             return;
         }
         
-        group = zend_hash_str_find(Z_ARRVAL_P(result), group_key, strlen(group_key));
-        if (!group){
-            array_init(&group_value);
-            if (!is_array_table) {
-                group = zend_hash_str_update(Z_ARRVAL_P(result), group_key, strlen(group_key), &group_value);
-            }else{
-                zval tmp_group_value;
-                uint32_t num;
-
-                array_init(&tmp_group_value);
-                found_group = zend_hash_str_update(Z_ARRVAL_P(result), group_key, strlen(group_key), &group_value);
-                zend_hash_next_index_insert(Z_ARR_P(found_group), &tmp_group_value);
+        g = zend_hash_str_find(Z_ARRVAL_P(result), g_key, strlen(g_key));
+        if (!g){
+            zval items;
+            array_init(&items);
+            g = zend_hash_str_update(Z_ARRVAL_P(result), g_key, strlen(g_key), &items);
+            
+            if (is_array_table) {
+                zval g_items;
                 
-                num = zend_hash_num_elements(Z_ARR_P(found_group));
-                group = zend_hash_index_find(Z_ARR_P(found_group), num - 1);
-                if (!group) {
-                    php_error_docref(NULL, E_ERROR, "Array tables core error, not found array index %d, line %d", num, line);
-                }
+                array_init(&g_items);
+                g = zend_hash_next_index_insert(Z_ARR_P(g), &g_items);
+                
+                *top_is_array_table = 1;
+            }else{
+                *top_is_array_table = 0;
             }
         }else{
-            if (!is_array_table) {
-                if (tmp_stock_str == NULL) {
-                    php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", group_key, line);
-                    return;
-                }
-            }else{
-                zval tmp_group_value;
-                uint32_t num;
+            if (!is_array_table && g_tok_key_str == NULL) {
+                php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
+                return;
+            }
+            
+            if (is_array_table) {
                 
-                if (tmp_stock_str == NULL) {
-                    array_init(&tmp_group_value);
-                    zend_hash_next_index_insert(Z_ARR_P(group), &tmp_group_value);
+                if (g_tok_key_str == NULL) {
+                    zval g_items;
+                    array_init(&g_items);
+                    g = zend_hash_next_index_insert(Z_ARR_P(g), &g_items);
+                }else{
+                    g = get_array_last_item(g);
                 }
-
-                num = zend_hash_num_elements(Z_ARR_P(group));
-                group = zend_hash_index_find(Z_ARR_P(group), num - 1);
-                if (!group) {
-                    php_error_docref(NULL, E_ERROR, "Array tables core error, not found array index %d, line %d", num, line);
-                }
+            }else if (*top_is_array_table){
+                g = get_array_last_item(g);
             }
         }
         
-        while ((group_key = php_strtok_r(NULL, ".", &tmp_stock_str))) {
-            found_group = zend_hash_str_find(Z_ARRVAL_P(group), group_key, strlen(group_key));
-            if (!found_group){
-                if (!is_array_table) {
-                    zval group_child_value;
-                    array_init(&group_child_value);
-                    found_group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &group_child_value);
-                }else{
-                    zval group_child_value;
-                    array_init(&group_child_value);
-                    found_group = zend_hash_str_update(Z_ARRVAL_P(group), group_key, strlen(group_key), &group_child_value);
+        while ((g_key = php_strtok_r(NULL, ".", &g_tok_key_str))) {
+            gp = zend_hash_str_find(Z_ARRVAL_P(g), g_key, strlen(g_key));
+            if (!gp){
+                zval items;
+                array_init(&items);
+                gp = zend_hash_str_update(Z_ARRVAL_P(g), g_key, strlen(g_key), &items);
+                
+                if (is_array_table) {
+                    zval g_items;
+                    
+                    array_init(&g_items);
+                    gp = zend_hash_next_index_insert(Z_ARR_P(gp), &g_items);
                 }
             }else{
-                if (!is_array_table && tmp_stock_str == NULL) {
-                    php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", group_key, line);
+                
+                if (!is_array_table && g_tok_key_str == NULL) {
+                    php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
                     return;
+                }
+                
+                if (is_array_table) {
+                    if (g_tok_key_str == NULL) {
+                        zval g_items;
+                        array_init(&g_items);
+                        gp = zend_hash_next_index_insert(Z_ARR_P(gp), &g_items);
+                    }else{
+                        gp = get_array_last_item(gp);
+                    }
+                }else if (*top_is_array_table){
+                    gp = get_array_last_item(gp);
                 }
             }
             
-            if (!is_array_table) {
-                group = found_group;
-            }else{
-                zval tmp_group_value;
-                uint32_t num;
-                
-                if (tmp_stock_str == NULL) {
-                    array_init(&tmp_group_value);
-                    zend_hash_next_index_insert(Z_ARR_P(found_group), &tmp_group_value);
-                }
-                
-                num = zend_hash_num_elements(Z_ARR_P(found_group));
-//                printf("%d", num);
-                group = zend_hash_index_find(Z_ARR_P(found_group), num - 1);
-                if (!group) {
-                    php_error_docref(NULL, E_ERROR, "Array tables core error");
-                }
-            }
+            g = gp;
         }
-        efree(tmp_str);
-        *group_add_item = group;
+        
+        efree(g_key_str);
+        *group = g;
         return;
     }
 
-    item_key = php_strtok_r(row, "=", &item_value);
+    
+    item_key = php_strtok_r(str, "=", &item_val);
     if (item_key) {
-        zval parse_value;
+        zval val;
 
-        if (!*group_add_item) {
-            group = result;
-        }else{
-            group = *group_add_item;
-        }
+        g = !*group ? result : *group;
         
         //blank key
-        if (!item_value) {
-            item_value = item_key;
+        if (!item_val) {
+            item_val = item_key;
             item_key = NULL;
-        }else if(strlen(item_key) == 2 &&
-                 ((item_key[0] == '\'' && item_key[1] == '\'') || (item_key[0] == '"' && item_key[1] == '"'))){
+        }else if(strlen(item_key) == 2 && (memcmp(item_key, "\"\"", 2) == 0 || memcmp(item_key, "''", 2) == 0)){
             item_key = NULL;
         }
 
-        parse_value = toml_parse_value(item_value, line);
+        val = toml_parse_item_value(item_val, len, line);
         if (item_key == NULL) {
-            zend_hash_next_index_insert(Z_ARR_P(group), &parse_value);
+            zend_hash_next_index_insert(Z_ARR_P(g), &val);
         }else{
-            zend_hash_str_update(Z_ARR_P(group), item_key, strlen(item_key), &parse_value);
+            zend_hash_str_update(Z_ARR_P(g), item_key, strlen(item_key), &val);
         }
 
     }else{
-        php_error_docref(NULL, E_ERROR, "Invalid key: %s, lime %d", row, line);
+        php_error_docref(NULL, E_ERROR, "Invalid key: %s, lime %d", raw_str, line);
     }
 
-
 }
-
 
 /* Every user-visible function in PHP should document itself in the source */
 /* {{{ proto string confirm_toml_compiled(string arg)
    Return a string to confirm that the module is compiled in */
 PHP_FUNCTION(toml_parse)
 {
-	zend_string *toml_file;
-    zval result, *group = NULL;
+	zend_string *toml_file, *toml_contents;
     php_stream *stream;
     zend_bool in_string = 0, in_comment = 0;
     zend_bool in_basic_string = 0,  in_literal_string = 0;
     zend_bool in_multi_basic_string = 0, in_multi_literal_string = 0;
     zend_bool ignore_blank_to_next_char = 0;
     unsigned int array_depth = 0;
-    zend_string *toml_contents;
+    zval result, *group = NULL;
+    zend_bool top_is_array_table = 0;
     char *buffer = NULL, *contents;
-    size_t buffer_length = sizeof(char) * TOML_BUFFER_SIZE + 1, buffer_used = 0;
-    int line = 1;
+    size_t buffer_used = 0, toml_contents_len = 0;
+    unsigned int line = 1;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_file) == FAILURE) {
 		return;
@@ -410,28 +378,44 @@ PHP_FUNCTION(toml_parse)
         array_init(return_value);
         return;
     }
-
-    buffer = (char *) emalloc(buffer_length);
-    memset((void *)buffer, 0, buffer_length);
+    
+    php_stream_close(stream);
 
     array_init(&result);
-
+    toml_contents_len = ZSTR_LEN(toml_contents);
+    buffer = (char *) ecalloc(sizeof(char), toml_contents_len + 1);
     contents = ZSTR_VAL(toml_contents);
+    
     for (size_t i=0, len=ZSTR_LEN(toml_contents); i<len; i++) {
-        int input_char = contents[i];
+        char input_char = contents[i];
 
         //start of comment
         if (input_char == '#' && !in_string) {
             in_comment = 1;
+        }
+        
+        //windows or mac
+        if (input_char == '\r') {
+            if (contents[i+1] == '\n') {
+                i++;
+                continue;
+            }
+            input_char = '\n';
+        }
+        
+        if (input_char == '\n'){
+            line++;
         }
 
 //        printf("%c", input_char);
         // start / end of string
         if (input_char == '"' && (i == 0 || contents[i-1]!= '\\') && !in_literal_string && !in_multi_literal_string) {
             in_string = in_string ? 0 : 1;
-            if (contents[i+1] == '"' && contents[i+2] == '"') {
-                if (in_basic_string) {
-                    php_error_docref(NULL, E_ERROR, "Basic string can't content multi string flag, line %d", line);
+            //multi string
+            if(memcmp(contents + i + 1, "\"\"", 2) == 0){
+//            if (contents[i+1] == '"' && contents[i+2] == '"') {
+                if (UNEXPECTED(in_basic_string)) {
+                    php_error_docref(NULL, E_ERROR, "Basic single string can not contain multi-string flag, line %d", line);
                     RETURN_FALSE;
                 }
                 in_multi_basic_string = in_multi_basic_string ? 0 : 1;
@@ -440,21 +424,23 @@ PHP_FUNCTION(toml_parse)
                     line++;
                     i+=1;
                 }
-                BUFFER_COPY_RESIZE(input_char);
-                continue;
             }else{
-                if (in_multi_basic_string) {
-                    php_error_docref(NULL, E_ERROR, "Basic multi string can't content single flag, line %d", line);
+                if (UNEXPECTED(in_multi_basic_string)) {
+                    php_error_docref(NULL, E_ERROR, "Basic multi-string can not contain single string flag, line %d", line);
                     RETURN_FALSE;
                 }
                 in_basic_string = in_basic_string ? 0 : 1;
             }
+            COPY_CHAR_TO_BUF(input_char, buffer, buffer_used);
+            continue;
         }
+        
         // start / end of string
         if (input_char == '\'' && (i == 0 || contents[i-1]!= '\\') && !in_basic_string && !in_multi_basic_string) {
-            if (contents[i+1] == '\'' && contents[i+2] == '\'') {
+            if (memcmp(contents + i + 1, "''", 2) == 0) {
+//            if (contents[i+1] == '\'' && contents[i+2] == '\'') {
                 in_string = in_string ? 0 : 1;
-                if (in_literal_string) {
+                if (UNEXPECTED(in_literal_string)) {
                     php_error_docref(NULL, E_ERROR, "Literal string can't content multi literal string flag, line %d", line);
                     RETURN_FALSE;
                 }
@@ -464,14 +450,14 @@ PHP_FUNCTION(toml_parse)
                     line++;
                     i+=1;
                 }
-                BUFFER_COPY_RESIZE(input_char);
-                continue;
             }else{
                 if (!in_multi_literal_string) {
                     in_string = in_string ? 0 : 1;
                     in_literal_string = in_literal_string ? 0 : 1;
                 }
             }
+            COPY_CHAR_TO_BUF(input_char, buffer, buffer_used);
+            continue;
         }
 
         if (input_char == '[' && !in_string) {
@@ -487,49 +473,33 @@ PHP_FUNCTION(toml_parse)
         }
 
         if (in_multi_basic_string) {
-            ignore_blank_to_next_char = 0;
-            if (contents[i] == '\\' && contents[i+1] == '\n') {
+            if (input_char == '\\' && contents[i+1] == '\n') {
                 ignore_blank_to_next_char = 1;
-                for (; ignore_blank_to_next_char; i++) {
-                    if (contents[i] == '\n') {
-                        line++;
-                    }
-                    if (!CHECK_NOT_WHITESPACE(contents[i+1])) {
-                        ignore_blank_to_next_char = 0;
-                    }
+                i += 1;
+                continue;
+            }
+            
+            if (ignore_blank_to_next_char) {
+                if (CHECK_NOT_WHITESPACE(input_char)) {
+                    continue;
                 }
-                i--;
-                continue;
-            }
-            if (!ignore_blank_to_next_char && contents[i] == '\n') {
-                line++;
-                BUFFER_COPY_RESIZE('\n');
-                continue;
-            }
-        }
-        if (in_multi_literal_string){
-            if (contents[i] == '\n') {
-                line++;
-                BUFFER_COPY_RESIZE('\n');
-                continue;
+                ignore_blank_to_next_char = 0;
             }
         }
         
-        if (input_char == '\n') {
+        if (input_char == '\n' && !(in_multi_literal_string || in_multi_basic_string)) {
             in_comment = 0;
 
-            if (in_string) {
+            if (UNEXPECTED(in_string)) {
                 php_error_docref(NULL, E_ERROR, "String exception: found a linefeed char, line: %d", line);
             }
 
-            if (array_depth == 0) {
-//                printf("%s\n", buffer);
-                toml_parse_line(&result, &group, buffer, line);
-                memset((void *)buffer, 0, buffer_length);
+            if (array_depth == 0 && buffer_used > 0) {
+                TOML_PARSE_STR(buffer, buffer_used);
+                memset((void *)buffer, 0, toml_contents_len + 1);
                 buffer_used = 0;
             }
             
-            line ++;
             continue;
         }
 
@@ -537,20 +507,21 @@ PHP_FUNCTION(toml_parse)
             continue;
         }
 
-        BUFFER_COPY_RESIZE(input_char);
+        COPY_CHAR_TO_BUF(input_char, buffer, buffer_used);
 
     };
 
-    toml_parse_line(&result, &group, buffer, line + 1);
+    if(buffer_used > 0){
+        TOML_PARSE_STR(buffer, buffer_used);
+    }
 
     efree(buffer);
     zend_string_free(toml_contents);
-    php_stream_close(stream);
 
     ZVAL_COPY_VALUE(return_value, &result);
-
     return;
 }
+
 /* }}} */
 /* The previous line is meant for vim and emacs, so it can correctly fold and
    unfold functions in source code. See the corresponding marks just before

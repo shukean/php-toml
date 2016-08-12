@@ -38,9 +38,6 @@ extern zend_module_entry toml_module_entry;
 #include "TSRM.h"
 #endif
 
-
-#define TOML_BUFFER_SIZE 1024
-
 /*
   	Declare any global variables you may need between the BEGIN
 	and END macros here:
@@ -51,8 +48,11 @@ ZEND_BEGIN_MODULE_GLOBALS(toml)
 ZEND_END_MODULE_GLOBALS(toml)
 */
 
-static zval toml_parse_value(char *item_value, int line);
-static zval toml_parse_array(char *item_value, int line);
+static zval toml_parse_item_value(char *item_value, size_t max_len, int line);
+static zval toml_parse_item_array(char *item_value, size_t max_len, int line);
+static zval* get_array_last_item(zval *stack);
+static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group, zend_bool *top_is_array_table, int line);
+static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval);
 
 /* Always refer to the globals in your function as TOML_G(variable).
    You are encouraged to rename these macros something shorter, see
