@@ -407,13 +407,14 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
     char *buffer = NULL, *contents;
     size_t buffer_used = 0, toml_contents_len = 0;
     unsigned int line = 1;
+    size_t i, len;
 
     array_init(&result);
     toml_contents_len = ZSTR_LEN(toml_contents);
     buffer = (char *) ecalloc(sizeof(char), toml_contents_len + 1);
     contents = ZSTR_VAL(toml_contents);
     
-    for (size_t i=0, len=ZSTR_LEN(toml_contents); i<len; i++) {
+    for (i=0, len=ZSTR_LEN(toml_contents); i<len; i++) {
         char input_char = contents[i];
 
         //start of comment
