@@ -35,9 +35,13 @@ ZEND_DECLARE_MODULE_GLOBALS(toml)
 
 /* True global resources - no need for thread safety here */
 static int le_toml;
-static HashTable *toml_files_vals;
-static HashTable *toml_files_mtime;
+static HashTable *toml_files_containers;
 
+typedef struct _toml_file_node {
+    zend_string *file_name;
+    zend_long file_mtime;
+    HashTable *value;
+} toml_file_node;
 
 /* {{{ PHP_INI */
 PHP_INI_BEGIN()
@@ -54,10 +58,6 @@ PHP_INI_END()
  }
 /* }}} */
 
-/* Remove the following function when you have successfully modified config.m4
-   so that your module can be compiled into PHP, it exists only for testing
-   purposes. */
-
 
 #define CHECK_NOT_WHITESPACE(c) \
     ((c) == '\b' || (c) == '\t' || (c) == '\n' || (c) == '\f' || (c) == '\r' || (c) == ' ') 
@@ -71,8 +71,8 @@ PHP_INI_END()
     pos += sizeof(c);                               \
 }
 
-#define PALLOC_HASHTABLE(ht)   do {                                                       \
-    (ht) = (HashTable*)pemalloc(sizeof(HashTable), 1);                                    \
+#define PALLOC_HASHTABLE(ht, persistent)   do {                                           \
+    (ht) = (HashTable*)pemalloc(sizeof(HashTable), persistent);                           \
     if ((ht) == NULL) {                                                                   \
         zend_error(E_ERROR, "Cannot allocate persistent HashTable, out enough memory?");  \
     }                                                                                     \
@@ -534,7 +534,6 @@ PHP_FUNCTION(toml_parse_string)
     return;
 }
 
-
 PHP_FUNCTION(toml_parse_file)
 {
     zend_string *toml_file, *toml_contents;
@@ -559,19 +558,20 @@ PHP_FUNCTION(toml_parse_file)
     }
     
     if (TOML_G(cache_enable)) {
-        zval *mtime;
-        mtime = zend_hash_find(toml_files_mtime, toml_file);
-        if (mtime) {
+        toml_file_node *file_node;
+        
+        file_node = (toml_file_node *) zend_hash_find_ptr(toml_files_containers, toml_file);
+        if (file_node) {
             if (UNEXPECTED(TOML_DEBUG)) {
                 zend_error(E_NOTICE, "File found in cache %s", file);
             }
-            if (sb.st_mtime == Z_LVAL_P(mtime)){
-                zval *val;
+            if (sb.st_mtime == file_node->file_mtime){
+                HashTable *val = file_node->value;
+                array_init_size(return_value, zend_hash_num_elements(val));
                 
-                val = zend_hash_find(toml_files_vals, toml_file);
-                ZVAL_DUP(return_value, val);
+                zend_hash_copy(Z_ARR_P(return_value), val, &toml_copy_val);
                 
-                zend_string_free(toml_file);
+                zend_string_release(toml_file);
                 return;
             }
             
@@ -579,8 +579,7 @@ PHP_FUNCTION(toml_parse_file)
                 zend_error(E_NOTICE, "File found in cache, but file mtime was changed %s", file);
             }
             
-            zend_hash_del(toml_files_mtime, toml_file);
-            zend_hash_del(toml_files_vals, toml_file);
+            zend_hash_del(toml_files_containers, toml_file);
         }
     }
     
@@ -602,7 +601,7 @@ PHP_FUNCTION(toml_parse_file)
     parse_toml(toml_contents, return_value);
     
     if (TOML_G(cache_enable)) {
-        toml_copy_val_persistent(return_value, toml_file, sb.st_mtime);
+        toml_file_copy_containers(return_value, toml_file, sb.st_mtime);
     }
     
     zend_string_free(toml_contents);
@@ -611,59 +610,70 @@ PHP_FUNCTION(toml_parse_file)
     return;
 }
 
-static void toml_zval_persistent(zval *zv, zval *rv){
+static void toml_copy_val(zval *pElement){
+    Z_TRY_ADDREF_P(pElement);
+}
+
+static void toml_zval_copy(zval *zv, zval *rv, zend_bool persistent){
     switch (Z_TYPE_P(zv)) {
-        case IS_CONSTANT:
         case IS_STRING:
-            ZVAL_INTERNED_STR(rv, zend_string_dup(Z_STR_P(zv), 1));
+            ZVAL_INTERNED_STR(rv, zend_string_dup(Z_STR_P(zv), persistent));
             break;
         case IS_ARRAY:
         {
-            toml_hash_init(rv, zend_hash_num_elements(Z_ARRVAL_P(zv)));
-            toml_hash_copy(Z_ARRVAL_P(rv), Z_ARRVAL_P(zv));
+            toml_hash_init(rv, zend_hash_num_elements(Z_ARRVAL_P(zv)), persistent);
+            toml_hash_copy(Z_ARRVAL_P(rv), Z_ARRVAL_P(zv), persistent);
         }
             break;
-        case IS_RESOURCE:
-        case IS_OBJECT:
+        case IS_LONG:
+        case IS_DOUBLE:
+        case IS_TRUE:
+        case IS_FALSE:
+            ZVAL_COPY(rv, zv);
+            break;
+        default:
             ZEND_ASSERT(0);
             break;
     }
 }
 
-static void toml_hash_init(zval *zv, uint32_t size) {
+static void toml_hash_init(zval *zv, uint32_t size, zend_bool persistent) {
     HashTable *ht;
-    PALLOC_HASHTABLE(ht);
+    PALLOC_HASHTABLE(ht, persistent);
     zend_hash_init(ht, size, NULL, NULL, 1);
     ZVAL_ARR(zv, ht);
     Z_ADDREF_P(zv);
 }
 
-static void toml_hash_copy(HashTable *target, HashTable *source) {
+static void toml_hash_copy(HashTable *target, HashTable *source, zend_bool persistent) {
     zend_string *key;
     zend_long idx;
     zval *element, rv;
     
     ZEND_HASH_FOREACH_KEY_VAL(source, idx, key, element) {
-        toml_zval_persistent(element, &rv);
+        toml_zval_copy(element, &rv, persistent);
         if (key) {
-            zend_hash_update(target, zend_string_dup(key, 1), &rv);
+            zend_hash_update(target, zend_string_dup(key, persistent), &rv);
         } else {
             zend_hash_index_update(target, idx, &rv);
         }
     } ZEND_HASH_FOREACH_END();
 }
 
-static void toml_copy_val_persistent(zval *file_val, zend_string *key, long file_mtime){
-    zend_string *k = zend_string_dup(key, 1);
-    zval mtime, val;
+static void toml_file_copy_containers(zval *file_val, zend_string *key, long file_mtime){
     
-    ZVAL_LONG(&mtime, file_mtime);
-    zend_hash_update(toml_files_mtime, k, &mtime);
+    toml_file_node node;
+    HashTable *val;
     
-    toml_hash_init(&val, zend_hash_num_elements(Z_ARR_P(file_val)));
-    toml_hash_copy(Z_ARR(val), Z_ARR_P(file_val));
+    PALLOC_HASHTABLE(val, 1);
+    zend_hash_init(val, zend_hash_num_elements(Z_ARR_P(file_val)), NULL, NULL, 1);
+    toml_hash_copy(val, Z_ARR_P(file_val), 1);
     
-    zend_hash_update(toml_files_vals, k, &val);
+    node.file_mtime = file_mtime;
+    node.file_name = zend_string_dup(key, 1);
+    node.value = val;
+
+    zend_hash_update_mem(toml_files_containers, node.file_name, &node, sizeof(toml_file_node));
 }
 
 
@@ -675,11 +685,8 @@ PHP_MINIT_FUNCTION(toml)
 	REGISTER_INI_ENTRIES();
     
     if (TOML_G(cache_enable)) {
-        PALLOC_HASHTABLE(toml_files_mtime);
-        zend_hash_init(toml_files_mtime, 10, NULL, NULL, 1);
-        
-        PALLOC_HASHTABLE(toml_files_vals);
-        zend_hash_init(toml_files_vals, 10, NULL, NULL, 1);
+        PALLOC_HASHTABLE(toml_files_containers, 1);
+        zend_hash_init(toml_files_containers, 10, NULL, NULL, 1);
     }
 	
 	return SUCCESS;
@@ -692,6 +699,10 @@ PHP_MSHUTDOWN_FUNCTION(toml)
 {
 	
 	UNREGISTER_INI_ENTRIES();
+    
+    if (toml_files_containers) {
+        zend_hash_destroy(toml_files_containers);
+    }
 	
 	return SUCCESS;
 }

@@ -12,21 +12,15 @@ foreach($functions as $func) {
 }
 echo "$br\n";
 
+$i = 0;
 
+do{
+
+echo "\n\n\n";
 $ret = toml_parse_file('./../php-toml/demo.toml');
-
-echo "\n";
-
-print_r(serialize($ret));
-
-sleep(2);
-
-$ret = toml_parse_file('./../php-toml/demo.toml');
-
-echo "\n";
-
 print_r(serialize($ret));
 
 
+}while(++$i < 3);
 
 ?>

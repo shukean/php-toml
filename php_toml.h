@@ -57,10 +57,12 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
 static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval);
 static void parse_toml(zend_string *toml_contents, zval *return_value);
 
-static void toml_zval_persistent(zval *zv, zval *rv);
-static void toml_hash_init(zval *zv, uint32_t size);
-static void toml_hash_copy(HashTable *target, HashTable *source);
-static void toml_copy_val_persistent(zval *val, zend_string *key, long file_mtime);
+static void toml_zval_copy(zval *zv, zval *rv, zend_bool persistent);
+static void toml_hash_init(zval *zv, uint32_t size, zend_bool persistent);
+static void toml_hash_copy(HashTable *target, HashTable *source, zend_bool persistent);
+static void toml_file_copy_containers(zval *val, zend_string *key, long file_mtime);
+
+static void toml_copy_val(zval *pElement);
 
 /* Always refer to the globals in your function as TOML_G(variable).
    You are encouraged to rename these macros something shorter, see
