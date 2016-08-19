@@ -18,4 +18,4 @@ echo json_encode(toml_parse_file(__DIR__.'/013.toml'));
 */
 ?>
 --EXPECTF--
- Fatal error: toml_parse_file(): Table group1 is alreay defind, line 7.  in %s/013.php on line %d
+ Fatal error: Table group1 is alreay defind, line 7.  in %s/013.php on line %d
