@@ -17,6 +17,13 @@ The function returns array or **False** on failure.
 An E_ERROR level error is generated if toml contents parse fail, file cannot be found.   
 An E_NOTICE level error is generated if toml contents is empty.
 
+## PHP.ini
+
+toml.cache_enable = 1/0   
+
+If enable cache, toml\_parse_file function will cahce the success result.   
+If file updated, the file cache will auto reload on the next call.   
+
 ## Toml Syntax Supported
 
 ### Comment
