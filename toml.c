@@ -29,21 +29,29 @@
 #include "zend_strtod.h"
 #include "ext/standard/php_string.h"
 
-/* If you declare any globals in php_toml.h uncomment this:
+/* If you declare any globals in php_toml.h uncomment this:*/
 ZEND_DECLARE_MODULE_GLOBALS(toml)
-*/
+
 
 /* True global resources - no need for thread safety here */
 static int le_toml;
+static HashTable *toml_files_vals;
+static HashTable *toml_files_mtime;
 
-/* {{{ PHP_INI
- */
-/* Remove comments and fill if you need to have entries in php.ini
+
+/* {{{ PHP_INI */
 PHP_INI_BEGIN()
-    STD_PHP_INI_ENTRY("toml.global_value",      "42", PHP_INI_ALL, OnUpdateLong, global_value, zend_toml_globals, toml_globals)
-    STD_PHP_INI_ENTRY("toml.global_string", "foobar", PHP_INI_ALL, OnUpdateString, global_string, zend_toml_globals, toml_globals)
+    STD_PHP_INI_ENTRY("toml.cache_enable", "0", PHP_INI_SYSTEM, OnUpdateBool, cache_enable, zend_toml_globals, toml_globals)
 PHP_INI_END()
-*/
+ /* }}} */
+
+
+/* {{{ php_toml_init_globals
+ */
+ static void php_toml_init_globals(zend_toml_globals *toml_globals)
+ {
+	toml_globals->cache_enable = 0;
+ }
 /* }}} */
 
 /* Remove the following function when you have successfully modified config.m4
@@ -63,6 +71,12 @@ PHP_INI_END()
     pos += sizeof(c);                               \
 }
 
+#define PALLOC_HASHTABLE(ht)   do {                                                       \
+    (ht) = (HashTable*)pemalloc(sizeof(HashTable), 1);                                    \
+    if ((ht) == NULL) {                                                                   \
+        zend_error(E_ERROR, "Cannot allocate persistent HashTable, out enough memory?");  \
+    }                                                                                     \
+} while(0)
 
 static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval){
     size_t s1 = 0, s2 = 0, l = 0;
@@ -125,7 +139,7 @@ static zval toml_parse_item_array(char *item_value, size_t max_len, int line){
 	}
 
 	if (depth != 0) {
-		php_error_docref(NULL, E_ERROR, "Unclosed array %s, line %d", item_value, line);
+		php_error(E_ERROR, "Unclosed array %s, line %d", item_value, line);
 		return arr;
 	}
 
@@ -183,7 +197,7 @@ static zval toml_parse_item_value(char *item_value, size_t max_len, int line){
         }else if (ret_numeric == IS_DOUBLE){
             ZVAL_DOUBLE(&val, dval);
         }else{
-            php_error_docref(NULL, E_ERROR, "Convert to number fail %s, line %d", item_value, line);
+            php_error(E_ERROR, "Convert to number fail %s, line %d", item_value, line);
         }
         return val;
     }
@@ -206,7 +220,7 @@ static zval toml_parse_item_value(char *item_value, size_t max_len, int line){
         return toml_parse_item_array(item_value, max_len, line);
     }
     
-    php_error_docref(NULL, E_ERROR, "Undefined value type not supported %s, line %d", item_value, line);
+    php_error(E_ERROR, "Undefined value type not supported %s, line %d", item_value, line);
     
     ZVAL_NULL(&val);
     return val;
@@ -235,7 +249,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
         g_key = php_strtok_r(g_key_str, ".", &g_tok_key_str);
         if (UNEXPECTED(!g_key)) {
             efree(g_key_str);
-            php_error_docref(NULL, E_ERROR, "Group name parse fail : %s, line: %d", raw_str, line);
+            php_error(E_ERROR, "Group name parse fail : %s, line: %d", raw_str, line);
             return;
         }
         
@@ -257,7 +271,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
             }
         }else{
             if (!is_array_table && g_tok_key_str == NULL) {
-                php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
+                php_error(E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
                 return;
             }
             
@@ -291,7 +305,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
             }else{
                 
                 if (!is_array_table && g_tok_key_str == NULL) {
-                    php_error_docref(NULL, E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
+                    php_error(E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
                     return;
                 }
                 
@@ -348,51 +362,9 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
         }
 
     }else{
-        php_error_docref(NULL, E_ERROR, "Invalid key: %s, lime %d", raw_str, line);
+        php_error(E_ERROR, "Invalid key: %s, lime %d", raw_str, line);
     }
 
-}
-
-
-
-PHP_FUNCTION(toml_parse_string)
-{
-    zend_string *toml_contents;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_contents) == FAILURE) {
-        return;
-    }
-    
-    parse_toml(toml_contents, return_value);
-}
-
-
-PHP_FUNCTION(toml_parse_file)
-{
-    zend_string *toml_file, *toml_contents;
-    php_stream *stream;
-    
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_file) == FAILURE) {
-        return;
-    }
-    
-    stream = php_stream_open_wrapper(ZSTR_VAL(toml_file), "rb", USE_PATH | REPORT_ERRORS, NULL);
-    if (!stream) {
-        php_error_docref(NULL, E_ERROR, "toml file open fail");
-        RETURN_FALSE;
-    }
-    
-    if ((toml_contents = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0)) == NULL) {
-        php_stream_close(stream);
-        php_error_docref(NULL, E_NOTICE, "toml file empty");
-        array_init(return_value);
-        return;
-    }
-    
-    php_stream_close(stream);
-    
-    parse_toml(toml_contents, return_value);
-    
-    zend_string_free(toml_contents);
 }
 
 
@@ -408,7 +380,7 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
     size_t buffer_used = 0, toml_contents_len = 0;
     unsigned int line = 1;
     size_t i, len;
-
+    
     array_init(&result);
     toml_contents_len = ZSTR_LEN(toml_contents);
     buffer = (char *) ecalloc(sizeof(char), toml_contents_len + 1);
@@ -416,7 +388,7 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
     
     for (i=0, len=ZSTR_LEN(toml_contents); i<len; i++) {
         char input_char = contents[i];
-
+        
         //start of comment
         if (input_char == '#' && !in_string) {
             in_comment = 1;
@@ -434,16 +406,16 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
         if (input_char == '\n'){
             line++;
         }
-
-//        printf("%c", input_char);
+        
+        //        printf("%c", input_char);
         // start / end of string
         if (input_char == '"' && (i == 0 || contents[i-1]!= '\\') && !in_literal_string && !in_multi_literal_string) {
             in_string = in_string ? 0 : 1;
             //multi string
             if(memcmp(contents + i + 1, "\"\"", 2) == 0){
-//            if (contents[i+1] == '"' && contents[i+2] == '"') {
+                //            if (contents[i+1] == '"' && contents[i+2] == '"') {
                 if (UNEXPECTED(in_basic_string)) {
-                    php_error_docref(NULL, E_ERROR, "Basic single string can not contain multi-string flag, line %d", line);
+                    php_error(E_ERROR, "Basic single string can not contain multi-string flag, line %d", line);
                     RETURN_FALSE;
                 }
                 in_multi_basic_string = in_multi_basic_string ? 0 : 1;
@@ -454,7 +426,7 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
                 }
             }else{
                 if (UNEXPECTED(in_multi_basic_string)) {
-                    php_error_docref(NULL, E_ERROR, "Basic multi-string can not contain single string flag, line %d", line);
+                    php_error(E_ERROR, "Basic multi-string can not contain single string flag, line %d", line);
                     RETURN_FALSE;
                 }
                 in_basic_string = in_basic_string ? 0 : 1;
@@ -466,10 +438,10 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
         // start / end of string
         if (input_char == '\'' && (i == 0 || contents[i-1]!= '\\') && !in_basic_string && !in_multi_basic_string) {
             if (memcmp(contents + i + 1, "''", 2) == 0) {
-//            if (contents[i+1] == '\'' && contents[i+2] == '\'') {
+                //            if (contents[i+1] == '\'' && contents[i+2] == '\'') {
                 in_string = in_string ? 0 : 1;
                 if (UNEXPECTED(in_literal_string)) {
-                    php_error_docref(NULL, E_ERROR, "Literal string can't content multi literal string flag, line %d", line);
+                    php_error(E_ERROR, "Literal string can't content multi literal string flag, line %d", line);
                     RETURN_FALSE;
                 }
                 in_multi_literal_string = in_multi_literal_string ? 0 : 1;
@@ -487,19 +459,19 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
             COPY_CHAR_TO_BUF(input_char, buffer, buffer_used);
             continue;
         }
-
+        
         if (input_char == '[' && !in_string) {
             array_depth ++;
         }
-
+        
         if (input_char == ']' && !in_string) {
             array_depth --;
         }
-
+        
         if (input_char == ' ' && !in_string) {
             continue;
         }
-
+        
         if (in_multi_basic_string) {
             if (input_char == '\\' && contents[i+1] == '\n') {
                 ignore_blank_to_next_char = 1;
@@ -517,11 +489,11 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
         
         if (input_char == '\n' && !(in_multi_literal_string || in_multi_basic_string)) {
             in_comment = 0;
-
+            
             if (UNEXPECTED(in_string)) {
-                php_error_docref(NULL, E_ERROR, "String exception: found a linefeed char, line: %d", line);
+                php_error(E_ERROR, "String exception: found a linefeed char, line: %d", line);
             }
-
+            
             if (array_depth == 0 && buffer_used > 0) {
                 TOML_PARSE_STR(buffer, buffer_used);
                 memset((void *)buffer, 0, toml_contents_len + 1);
@@ -530,51 +502,186 @@ static void parse_toml(zend_string *toml_contents, zval *return_value){
             
             continue;
         }
-
+        
         if (in_comment) {
             continue;
         }
-
+        
         COPY_CHAR_TO_BUF(input_char, buffer, buffer_used);
-
+        
     };
-
+    
     if(buffer_used > 0){
         TOML_PARSE_STR(buffer, buffer_used);
     }
-
+    
     efree(buffer);
     
     ZVAL_COPY_VALUE(return_value, &result);
     return;
 }
 
-/* }}} */
-/* The previous line is meant for vim and emacs, so it can correctly fold and
-   unfold functions in source code. See the corresponding marks just before
-   function definition, where the functions purpose is also documented. Please
-   follow this convention for the convenience of others editing your code.
-*/
 
-
-/* {{{ php_toml_init_globals
- */
-/* Uncomment this function if you have INI entries
-static void php_toml_init_globals(zend_toml_globals *toml_globals)
+PHP_FUNCTION(toml_parse_string)
 {
-	toml_globals->global_value = 0;
-	toml_globals->global_string = NULL;
+    zend_string *toml_contents;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S", &toml_contents) == FAILURE) {
+        return;
+    }
+    
+    parse_toml(toml_contents, return_value);
+    
+    return;
 }
-*/
-/* }}} */
+
+
+PHP_FUNCTION(toml_parse_file)
+{
+    zend_string *toml_file, *toml_contents;
+    char *file;
+    size_t file_len;
+    php_stream *stream;
+    struct zend_stat sb;
+    
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &file, &file_len) == FAILURE) {
+        return;
+    }
+    
+    toml_file = php_resolve_path(file, (int)file_len, PG(include_path));
+    if (!toml_file) {
+        zend_error(E_ERROR, "Toml file %s not found in path", file);
+        return;
+    }
+    file = ZSTR_VAL(toml_file);
+    
+    if (VCWD_STAT(file, &sb) != 0) {
+        php_error(E_WARNING, "Could not stat '%s'", file);
+    }
+    
+    if (TOML_G(cache_enable)) {
+        zval *mtime;
+        mtime = zend_hash_find(toml_files_mtime, toml_file);
+        if (mtime) {
+            if (UNEXPECTED(TOML_DEBUG)) {
+                zend_error(E_NOTICE, "File found in cache %s", file);
+            }
+            if (sb.st_mtime == Z_LVAL_P(mtime)){
+                zval *val;
+                
+                val = zend_hash_find(toml_files_vals, toml_file);
+                ZVAL_DUP(return_value, val);
+                
+                zend_string_free(toml_file);
+                return;
+            }
+            
+            if (UNEXPECTED(TOML_DEBUG)) {
+                zend_error(E_NOTICE, "File found in cache, but file mtime was changed %s", file);
+            }
+            
+            zend_hash_del(toml_files_mtime, toml_file);
+            zend_hash_del(toml_files_vals, toml_file);
+        }
+    }
+    
+    stream = php_stream_open_wrapper(ZSTR_VAL(toml_file), "rb", USE_PATH | REPORT_ERRORS, NULL);
+    if (!stream) {
+        php_error(E_ERROR, "Toml file open fail %s", file);
+        RETURN_FALSE;
+    }
+    
+    if ((toml_contents = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0)) == NULL) {
+        php_stream_close(stream);
+        php_error(E_NOTICE, "Toml file empty %s", file);
+        array_init(return_value);
+        return;
+    }
+    
+    php_stream_close(stream);
+    
+    parse_toml(toml_contents, return_value);
+    
+    if (TOML_G(cache_enable)) {
+        toml_copy_val_persistent(return_value, toml_file, sb.st_mtime);
+    }
+    
+    zend_string_free(toml_contents);
+    zend_string_free(toml_file);
+    
+    return;
+}
+
+static void toml_zval_persistent(zval *zv, zval *rv){
+    switch (Z_TYPE_P(zv)) {
+        case IS_CONSTANT:
+        case IS_STRING:
+            ZVAL_INTERNED_STR(rv, zend_string_dup(Z_STR_P(zv), 1));
+            break;
+        case IS_ARRAY:
+        {
+            toml_hash_init(rv, zend_hash_num_elements(Z_ARRVAL_P(zv)));
+            toml_hash_copy(Z_ARRVAL_P(rv), Z_ARRVAL_P(zv));
+        }
+            break;
+        case IS_RESOURCE:
+        case IS_OBJECT:
+            ZEND_ASSERT(0);
+            break;
+    }
+}
+
+static void toml_hash_init(zval *zv, uint32_t size) {
+    HashTable *ht;
+    PALLOC_HASHTABLE(ht);
+    zend_hash_init(ht, size, NULL, NULL, 1);
+    ZVAL_ARR(zv, ht);
+    Z_ADDREF_P(zv);
+}
+
+static void toml_hash_copy(HashTable *target, HashTable *source) {
+    zend_string *key;
+    zend_long idx;
+    zval *element, rv;
+    
+    ZEND_HASH_FOREACH_KEY_VAL(source, idx, key, element) {
+        toml_zval_persistent(element, &rv);
+        if (key) {
+            zend_hash_update(target, zend_string_dup(key, 1), &rv);
+        } else {
+            zend_hash_index_update(target, idx, &rv);
+        }
+    } ZEND_HASH_FOREACH_END();
+}
+
+static void toml_copy_val_persistent(zval *file_val, zend_string *key, long file_mtime){
+    zend_string *k = zend_string_dup(key, 1);
+    zval mtime, val;
+    
+    ZVAL_LONG(&mtime, file_mtime);
+    zend_hash_update(toml_files_mtime, k, &mtime);
+    
+    toml_hash_init(&val, zend_hash_num_elements(Z_ARR_P(file_val)));
+    toml_hash_copy(Z_ARR(val), Z_ARR_P(file_val));
+    
+    zend_hash_update(toml_files_vals, k, &val);
+}
+
 
 /* {{{ PHP_MINIT_FUNCTION
  */
 PHP_MINIT_FUNCTION(toml)
 {
-	/* If you have INI entries, uncomment these lines
+
 	REGISTER_INI_ENTRIES();
-	*/
+    
+    if (TOML_G(cache_enable)) {
+        PALLOC_HASHTABLE(toml_files_mtime);
+        zend_hash_init(toml_files_mtime, 10, NULL, NULL, 1);
+        
+        PALLOC_HASHTABLE(toml_files_vals);
+        zend_hash_init(toml_files_vals, 10, NULL, NULL, 1);
+    }
+	
 	return SUCCESS;
 }
 /* }}} */
@@ -583,9 +690,9 @@ PHP_MINIT_FUNCTION(toml)
  */
 PHP_MSHUTDOWN_FUNCTION(toml)
 {
-	/* uncomment this line if you have INI entries
+	
 	UNREGISTER_INI_ENTRIES();
-	*/
+	
 	return SUCCESS;
 }
 /* }}} */
@@ -619,9 +726,7 @@ PHP_MINFO_FUNCTION(toml)
 	php_info_print_table_header(2, "toml support", "enabled");
 	php_info_print_table_end();
 
-	/* Remove comments if you have entries in php.ini
 	DISPLAY_INI_ENTRIES();
-	*/
 }
 /* }}} */
 

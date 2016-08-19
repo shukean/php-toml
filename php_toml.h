@@ -24,7 +24,7 @@
 extern zend_module_entry toml_module_entry;
 #define phpext_toml_ptr &toml_module_entry
 
-#define PHP_TOML_VERSION "0.1.0" /* Replace with version number for your extension */
+#define PHP_TOML_VERSION "0.1.2" /* Replace with version number for your extension */
 
 #ifdef PHP_WIN32
 #	define PHP_TOML_API __declspec(dllexport)
@@ -41,12 +41,14 @@ extern zend_module_entry toml_module_entry;
 /*
   	Declare any global variables you may need between the BEGIN
 	and END macros here:
+*/
 
 ZEND_BEGIN_MODULE_GLOBALS(toml)
-	zend_long  global_value;
-	char *global_string;
+	zend_bool  cache_enable;
 ZEND_END_MODULE_GLOBALS(toml)
-*/
+
+
+#define TOML_DEBUG 0
 
 static zval toml_parse_item_value(char *item_value, size_t max_len, int line);
 static zval toml_parse_item_array(char *item_value, size_t max_len, int line);
@@ -54,6 +56,11 @@ static zval* get_array_last_item(zval *stack);
 static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group, zend_bool *top_is_array_table, int line);
 static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval);
 static void parse_toml(zend_string *toml_contents, zval *return_value);
+
+static void toml_zval_persistent(zval *zv, zval *rv);
+static void toml_hash_init(zval *zv, uint32_t size);
+static void toml_hash_copy(HashTable *target, HashTable *source);
+static void toml_copy_val_persistent(zval *val, zend_string *key, long file_mtime);
 
 /* Always refer to the globals in your function as TOML_G(variable).
    You are encouraged to rename these macros something shorter, see

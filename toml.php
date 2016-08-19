@@ -13,11 +13,19 @@ foreach($functions as $func) {
 echo "$br\n";
 
 
-$ret = toml_parse_file('./demo.toml');
+$ret = toml_parse_file('./../php-toml/demo.toml');
 
 echo "\n";
 
-print_r($ret);
+print_r(serialize($ret));
+
+sleep(2);
+
+$ret = toml_parse_file('./../php-toml/demo.toml');
+
+echo "\n";
+
+print_r(serialize($ret));
 
 
 
