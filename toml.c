@@ -80,23 +80,37 @@ PHP_INI_END()
 
 static zend_uchar toml_is_numeric(char *str, zend_long *lval, double  *dval){
     size_t s1 = 0, s2 = 0, l = 0;
-    char *new = ecalloc(sizeof(char), strlen(str) + 1);
-    char *raw = str;
+    char *new;
+    char *raw;
     zend_uchar ret;
+    size_t str_len = strlen(str), len2 = 0;
     
-    while (*str) {
-        if (*str == '_' || *str == ','){
-            memcpy(new + s2, raw + s1, l);
+    raw = str;
+    while (*raw) {
+        if (*raw == '_' || *raw == ','){
+            len2++;
+        }
+        raw++;
+    }
+    if (len2 == 0) {
+        return is_numeric_string(str, strlen(str), lval, dval, 1);
+    }
+    
+    new = ecalloc(sizeof(char), str_len - len2 + 1);
+    raw = str;
+    
+    while (*raw) {
+        if (*raw == '_' || *raw == ','){
+            memcpy(new + s2, str + s1, l);
             s1 += l + 1;
             s2 += l;
             l = 0;
         }else{
             l++;
         }
-        str++;
+        raw++;
     }
-    memcpy(new + s2, raw + s1, l);
-//    printf("%s\n", new);
+    memcpy(new + s2, str + s1, l);
     ret = is_numeric_string(new, strlen(new), lval, dval, 1);
     efree(new);
     return ret;
@@ -228,7 +242,7 @@ static zval toml_parse_item_value(char *item_value, size_t max_len, int line){
 
 
 static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group, zend_bool *top_is_array_table, int line){
-    char *item_key, *item_val;
+    const char *p1, *p2, *ptr;
     zval *g, *gp;
     char *str = raw_str;
 
@@ -331,35 +345,36 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
     }
 
     
-    item_key = php_strtok_r(str, "=", &item_val);
-    if (item_key) {
+    ptr = str + strlen(str);
+    p1 = (const char *)str;
+    p2 = php_memnstr(p1, ZEND_STRL("="), ptr);
+    
+    if (p2 != NULL && p2 < ptr) {
         zval val;
-
-        g = !*group ? result : *group;
+        char *item_key = NULL, *item_val = NULL;
+        size_t item_key_len = p2 - p1;
         
-        //blank key
-        if (!item_val) {
-            item_val = item_key;
-            item_key = NULL;
-        }else if(strlen(item_key) == 2 && (memcmp(item_key, "\"\"", 2) == 0 || memcmp(item_key, "''", 2) == 0)){
-            item_key = NULL;
+        if (*p1 == '"' || *p1 == '\'') {
+            if (item_key_len > 2){
+                item_key = estrndup(p1+1, item_key_len-2);
+            }
+        }else if(item_key_len > 0){
+            item_key = estrndup(p1, item_key_len);
         }
+        
+        item_val = estrndup(p2 + 1, ptr - p2);
+        
+        g = !*group ? result : *group;
 
         val = toml_parse_item_value(item_val, len, line);
         if (item_key == NULL) {
             zend_hash_next_index_insert(Z_ARR_P(g), &val);
+            efree(item_val);
         }else{
-            zend_bool is_quoted_key = 0;
-            if (item_key[0] == '"' || item_key[0] == '\'') {
-                char *key = estrndup(item_key + 1, strlen(item_key) - 2);
-                item_key = key;
-                is_quoted_key = 1;
-            }
             zend_hash_str_update(Z_ARR_P(g), item_key, strlen(item_key), &val);
-            if (is_quoted_key) {
-                efree(item_key);
-            }
+            efree(item_key);
         }
+        efree(item_val);
 
     }else{
         php_error(E_ERROR, "Invalid key: %s, lime %d", raw_str, line);
