@@ -242,7 +242,7 @@ static zval toml_parse_item_value(char *item_value, size_t max_len, int line){
 
 
 static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group, zend_bool *top_is_array_table, int line){
-    const char *p1, *p2, *ptr;
+    char *item_key, *item_val;
     zval *g, *gp;
     char *str = raw_str;
 
@@ -252,6 +252,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
         char *g_key_str, *g_tok_key_str;
         char *g_key;
         zend_bool is_array_table = 0;
+        size_t g_key_str_len = 0;
         
         if (str[1] == '[' && str[len-2] == ']') {
             is_array_table = 1;
@@ -259,6 +260,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
         }else{
             g_key_str = estrndup(str + 1, len-2);
         }
+        g_key_str_len = strlen(g_key_str);
         
         g_key = php_strtok_r(g_key_str, ".", &g_tok_key_str);
         if (UNEXPECTED(!g_key)) {
@@ -284,7 +286,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
                 *top_is_array_table = 0;
             }
         }else{
-            if (!is_array_table && g_tok_key_str == NULL) {
+            if (!is_array_table && (g_key_str_len == strlen(g_key))) {
                 php_error(E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
                 return;
             }
@@ -303,6 +305,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
             }
         }
         
+        g_key_str_len = g_tok_key_str ? strlen(g_tok_key_str) : 0;
         while ((g_key = php_strtok_r(NULL, ".", &g_tok_key_str))) {
             gp = zend_hash_str_find(Z_ARRVAL_P(g), g_key, strlen(g_key));
             if (!gp){
@@ -318,7 +321,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
                 }
             }else{
                 
-                if (!is_array_table && g_tok_key_str == NULL) {
+                if (!is_array_table && (g_key_str_len == strlen(g_key))) {
                     php_error(E_ERROR, "Table %s is alreay defind, line %d. ", g_key, line);
                     return;
                 }
@@ -335,6 +338,7 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
                     gp = get_array_last_item(gp);
                 }
             }
+            g_key_str_len = g_tok_key_str ? strlen(g_tok_key_str) : 0;
             
             g = gp;
         }
@@ -345,39 +349,44 @@ static void toml_parse_str(char *raw_str, size_t len, zval *result, zval **group
     }
 
     
-    ptr = str + strlen(str);
-    p1 = (const char *)str;
-    p2 = php_memnstr(p1, ZEND_STRL("="), ptr);
-    
-    if (p2 != NULL && p2 < ptr) {
+    item_key = php_strtok_r(str, "=", &item_val);
+    if (item_key != NULL) {
         zval val;
-        char *item_key = NULL, *item_val = NULL;
-        size_t item_key_len = p2 - p1;
+        zend_bool need_free_item_key = 0;
         
-        if (*p1 == '"' || *p1 == '\'') {
-            if (item_key_len > 2){
-                item_key = estrndup(p1+1, item_key_len-2);
-            }
-        }else if(item_key_len > 0){
-            item_key = estrndup(p1, item_key_len);
+        if (*str == '=') {
+            item_val = item_key;
+            item_key = NULL;
         }
         
-        item_val = estrndup(p2 + 1, ptr - p2);
+        if (item_key && (*item_key == '\'' || *item_key == '"')) {
+            char *end = item_key + strlen(item_key) - 1;
+            if (*end != *item_key) {
+                zend_error(E_ERROR, "Invalid key qoute: %s, line %d", raw_str, line);
+            }
+            if (strlen(item_key) == 2) {
+                item_key = NULL;
+            }else{
+                item_key = estrndup(item_key + 1, strlen(item_key) - 2);
+                need_free_item_key  = 1;
+            }
+        }
         
         g = !*group ? result : *group;
-
-        val = toml_parse_item_value(item_val, len, line);
+        
+        val = toml_parse_item_value(item_val, strlen(item_val), line);
         if (item_key == NULL) {
             zend_hash_next_index_insert(Z_ARR_P(g), &val);
-            efree(item_val);
         }else{
             zend_hash_str_update(Z_ARR_P(g), item_key, strlen(item_key), &val);
+        }
+        
+        if (need_free_item_key) {
             efree(item_key);
         }
-        efree(item_val);
-
+        
     }else{
-        php_error(E_ERROR, "Invalid key: %s, lime %d", raw_str, line);
+        php_error(E_ERROR, "Invalid key: %s, line %d", raw_str, line);
     }
 
 }
