@@ -759,7 +759,20 @@ PHP_MINFO_FUNCTION(toml)
 {
 	php_info_print_table_start();
 	php_info_print_table_header(2, "toml support", "enabled");
-	php_info_print_table_end();
+    php_info_print_table_row(2, "version", PHP_TOML_VERSION);
+    php_info_print_table_row(2, "enable cache", TOML_G(cache_enable) ? "On" : "Off");
+    php_info_print_table_end();
+    if (TOML_G(cache_enable)){
+        php_info_print_table_start();
+        php_info_print_table_header(2, "toml cache file", "file mtime");
+        if (zend_hash_num_elements(toml_files_containers)) {
+            toml_file_node *node;
+            ZEND_HASH_FOREACH_PTR(toml_files_containers, node) {
+                php_info_print_table_row(2, ZSTR_VAL(node->file_name),  ctime((time_t *)&node->file_mtime));
+            } ZEND_HASH_FOREACH_END();
+        }
+        php_info_print_table_end();
+    }
 
 	DISPLAY_INI_ENTRIES();
 }
